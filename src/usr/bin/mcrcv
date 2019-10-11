@@ -1,35 +1,83 @@
-#!/usr/bin/python
+#!/usr/bin/python3
+import sys
 import socket
 import struct
+import datetime
 import argparse
 import json
 import time
 
 current_nano_time = lambda: int(round(time.time() * 1000000))
-lastPktTime = 0
+
+# set to 1 if you want a 'spinner' to increment when a packet is received
+display_spinner = 1
+
+interval_seconds = 4
+current_interval = lambda: int(round(time.time())/interval_seconds)
+lastPacketInterval = 0
+
 lastSeqNum = -1
 
+pkts_in_this_second = 0
+bits_in_this_second = 0
+
+
+def spinning_cursor():
+    while True:
+        #for cursor in '|/-\\':
+        for cursor in '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz':
+            yield cursor
+
+spinner = spinning_cursor()
+
 def parse(addr, pkt):
-    global lastPktTime
     global lastSeqNum
+
+    global lastPacketInterval
+    global pkts_in_this_second
+    global bits_in_this_second
+
     rcvTime = current_nano_time()
-    timeTook = rcvTime - lastPktTime
-    lastPktTime = rcvTime
-    if (timeTook == 0):
-      timeTook = 0.00001;
-    bitsRcv = len(pkt)*8
-    bps = 1000000*bitsRcv/timeTook
+    thisPacketInterval = current_interval()
+    if pkt != "NOMESG":
+      bitsRcv = len(pkt)*8
+
+    if pkt == "NOMESG" and pkts_in_this_second == 0:
+      # not receiving
+      return
+
+    # add packet data to current interval. If this is a new interval, output interval data and reset.
+    if lastPacketInterval != thisPacketInterval and lastPacketInterval != 0:
+      # new interval, output last interval
+      bps_second = bits_in_this_second
+      niceTime = datetime.datetime.fromtimestamp(interval_seconds * lastPacketInterval).strftime("%Y-%m-%d %H:%M:%S")
+      numsec = ""
+      if interval_seconds != 1:
+        numsec = "for "+str(interval_seconds)+" sec"
+      print("\rSTATUS: Receive",numsec,"from",niceTime,":", pkts_in_this_second," packets at ",(bits_in_this_second/interval_seconds),"bits/sec")
+      bits_in_this_second = 0
+      pkts_in_this_second = 0
+
+    if pkt == "NOMESG":
+        return
+
+    lastPacketInterval = thisPacketInterval
+    pkts_in_this_second = pkts_in_this_second + 1
+    bits_in_this_second = bits_in_this_second + bitsRcv
+
     try:
-      obj = json.loads(pkt)
+      obj = json.loads(pkt.decode())
       latency = rcvTime - obj["time"]
       seqdiff = obj["seq"] - lastSeqNum
       if seqdiff != 1 and lastSeqNum > -1:
-        print "Out of sequence packet!",lastSeqNum,"->",obj["seq"]
+        print("DETAIL: Out of sequence packet!",lastSeqNum,"->",obj["seq"])
       lastSeqNum = obj["seq"]
-      print rcvTime,"Received from",addr," packet after",latency,"ns, interpacket time",timeTook,"bps=",bps
-      print pkt
+      if display_spinner:
+        print("\r",next(spinner), end='', flush=True, sep="")
+
     except: 
-      print "Received from ",addr," total ",bitsRcv,"bits in",timeTook,"ns",bps
+      # can't parse payload
+      print("DETAIL: Received unknown data from ",addr," total ",bitsRcv,"bits",pkt)
 
 def run(groups, port, iface=None, bind_group=None):
     # generally speaking you want to bind to one of the groups you joined in
@@ -47,7 +95,7 @@ def run(groups, port, iface=None, bind_group=None):
 
     sock.bind(('' if bind_group is None else bind_group, port))
     for group in groups:
-        print "Listening to",group,":",port
+        print("Listening to",group,":",port)
         mreq = struct.pack(
             '4sl' if iface is None else '4s4s',
             socket.inet_aton(group),
@@ -55,11 +103,17 @@ def run(groups, port, iface=None, bind_group=None):
 
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
+    sock.settimeout(1)
     while True:
-        tpl = sock.recvfrom(65536)
-        data = tpl[0]
-        add = tpl[1]
-        parse(add, data)
+        try:
+            tpl = sock.recvfrom(65536)
+            data = tpl[0]
+            add = tpl[1]
+            parse(add, data)
+        except KeyboardInterrupt:
+            raise SystemExit
+        except:
+            parse("0.0.0.0","NOMESG")
 
 
 if __name__ == '__main__':
@@ -80,5 +134,5 @@ if __name__ == '__main__':
         'If unspecified, bind to 0.0.0.0 '
         '(all addresses (all multicast addresses) of that interface)')
     args = parser.parse_args()
-    print "Listening to",args.groups
+    print("Listening to",args.groups)
     run(args.groups, args.port, args.iface, args.bind_group)
