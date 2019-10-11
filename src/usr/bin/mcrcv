@@ -1,0 +1,84 @@
+#!/usr/bin/python
+import socket
+import struct
+import argparse
+import json
+import time
+
+current_nano_time = lambda: int(round(time.time() * 1000000))
+lastPktTime = 0
+lastSeqNum = -1
+
+def parse(addr, pkt):
+    global lastPktTime
+    global lastSeqNum
+    rcvTime = current_nano_time()
+    timeTook = rcvTime - lastPktTime
+    lastPktTime = rcvTime
+    if (timeTook == 0):
+      timeTook = 0.00001;
+    bitsRcv = len(pkt)*8
+    bps = 1000000*bitsRcv/timeTook
+    try:
+      obj = json.loads(pkt)
+      latency = rcvTime - obj["time"]
+      seqdiff = obj["seq"] - lastSeqNum
+      if seqdiff != 1 and lastSeqNum > -1:
+        print "Out of sequence packet!",lastSeqNum,"->",obj["seq"]
+      lastSeqNum = obj["seq"]
+      print rcvTime,"Received from",addr," packet after",latency,"ns, interpacket time",timeTook,"bps=",bps
+      print pkt
+    except: 
+      print "Received from ",addr," total ",bitsRcv,"bits in",timeTook,"ns",bps
+
+def run(groups, port, iface=None, bind_group=None):
+    # generally speaking you want to bind to one of the groups you joined in
+    # this script,
+    # but it is also possible to bind to group which is added by some other
+    # programs (like another python program instance of this)
+
+    # assert bind_group in groups + [None], \
+    #     'bind group not in groups to join'
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+
+    # allow reuse of socket (to allow another instance of python running this
+    # script binding to the same ip/port)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+    sock.bind(('' if bind_group is None else bind_group, port))
+    for group in groups:
+        print "Listening to",group,":",port
+        mreq = struct.pack(
+            '4sl' if iface is None else '4s4s',
+            socket.inet_aton(group),
+            socket.INADDR_ANY if iface is None else socket.inet_aton(iface))
+
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+
+    while True:
+        tpl = sock.recvfrom(65536)
+        data = tpl[0]
+        add = tpl[1]
+        parse(add, data)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--port', type=int, default=19900)
+    parser.add_argument('--groups', default=["239.5.6.7"], nargs='*',
+                        help='multicast groups (ip addrs) to listen to join')
+    parser.add_argument(
+        '--iface', default=None,
+        help='local interface to use for listening to multicast data; '
+        'if unspecified, any interface would be chosen')
+    parser.add_argument(
+        '--bind-group', default=None,
+        help='multicast groups (ip addrs) to bind to for the udp socket; '
+        'should be one of the multicast groups joined globally '
+        '(not necessarily joined in this python program) '
+        'in the interface specified by --iface. '
+        'If unspecified, bind to 0.0.0.0 '
+        '(all addresses (all multicast addresses) of that interface)')
+    args = parser.parse_args()
+    print "Listening to",args.groups
+    run(args.groups, args.port, args.iface, args.bind_group)

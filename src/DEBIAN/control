@@ -1,0 +1,10 @@
+Package: mcats
+Version: 1.0.__datestamp__
+Architecture: all
+Maintainer: Paul Weaver <paul@newweaver.com>
+Depends: python
+Section: web
+Priority: optional
+Installed-Size: 1000
+Description: Package with a couple of multicast test tools
+ mcsend - sends multicast traffic. mcrcv, listens for multicast traffic
