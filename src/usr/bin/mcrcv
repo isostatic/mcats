@@ -13,7 +13,7 @@ current_nano_time = lambda: int(round(time.time() * 1000000))
 display_spinner = 1
 display_detail = 0
 
-interval_seconds = 4
+interval_seconds = 1
 current_interval = lambda: int(round(time.time())/interval_seconds)
 lastPacketInterval = 0
 
@@ -58,7 +58,9 @@ def parse(addr, ttl, pkt):
       numsec = ""
       if interval_seconds != 1:
         numsec = "for "+str(interval_seconds)+" sec"
-      hops = "("+str(lastHops)+" hops)"
+      hops = ""
+      if lastHops > -1:
+        hops = "("+str(lastHops)+" hops)"
       print("\rSTATUS: Receive",addport,"TTL=",ttl,hops,numsec,"from",niceTime,":", pkts_in_this_second," packets at ",(bits_in_this_second/interval_seconds),"bits/sec")
       bits_in_this_second = 0
       pkts_in_this_second = 0
@@ -81,6 +83,9 @@ def parse(addr, ttl, pkt):
       if display_spinner:
         print("\r",next(spinner), end='', flush=True, sep="")
       if display_detail:
+        hops = ""
+        if lastHops > -1:
+          hops = "("+str(lastHops)+" hops)"
         niceHops = "("+str(lastHops)+" hops)"
         print("Receive",addport,"TTL=",ttl,niceHops,"Seq=",obj["seq"]);
 
