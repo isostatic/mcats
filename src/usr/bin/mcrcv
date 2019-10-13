@@ -15,13 +15,13 @@ display_detail = 0
 
 interval_seconds = 1
 current_interval = lambda: int(round(time.time())/interval_seconds)
-lastPacketInterval = 0
 
-lastHops = -1
-lastSeqNum = -1
+lastPacketInterval = {}
+lastHops = {}
+lastSeqNum = {}
 
-pkts_in_this_second = 0
-bits_in_this_second = 0
+pkts_in_this_second = {}
+bits_in_this_second = {}
 
 
 def spinning_cursor():
@@ -40,6 +40,21 @@ def parse(addr, ttl, tos, pkt):
     global pkts_in_this_second
     global bits_in_this_second
 
+    if addr not in lastPacketInterval:
+        lastPacketInterval[addr] = 0
+
+    if addr not in lastHops:
+        lastHops[addr] = -1
+
+    if addr not in lastSeqNum:
+        lastSeqNum[addr] = -1
+
+    if addr not in bits_in_this_second:
+        bits_in_this_second[addr] = 0
+
+    if addr not in pkts_in_this_second:
+        pkts_in_this_second[addr] = 0
+
     addport = str(addr[0]) + ":" + str(addr[1])
     nicetos = ""
     if tos >= 0:
@@ -53,56 +68,56 @@ def parse(addr, ttl, tos, pkt):
     if pkt != "NOMESG":
       bitsRcv = len(pkt)*8
 
-    if pkt == "NOMESG" and pkts_in_this_second == 0:
+    if pkt == "NOMESG" and pkts_in_this_second[addr] == 0:
       # not receiving
       return
 
     # add packet data to current interval. If this is a new interval, output interval data and reset.
-    if lastPacketInterval != thisPacketInterval and lastPacketInterval != 0:
+    if lastPacketInterval[addr] != thisPacketInterval and lastPacketInterval[addr] != 0:
       # new interval, output last interval
-      bps_second = bits_in_this_second
-      niceTime = datetime.datetime.fromtimestamp(interval_seconds * lastPacketInterval).strftime("%Y-%m-%d %H:%M:%S")
+      bps_second = bits_in_this_second[addr]
+      niceTime = datetime.datetime.fromtimestamp(interval_seconds * lastPacketInterval[addr]).strftime("%Y-%m-%d %H:%M:%S")
       numsec = ""
       if interval_seconds != 1:
         numsec = "for "+str(interval_seconds)+" sec"
       hops = ""
-      if lastHops > -1:
-        hops = "("+str(lastHops)+" hops)"
-      print("\rSTATUS: Receive",addport,nicetos,nicettl,hops,numsec,"from",niceTime,":", pkts_in_this_second," packets at ",(bits_in_this_second/interval_seconds),"bits/sec")
-      bits_in_this_second = 0
-      pkts_in_this_second = 0
+      if lastHops[addr] > -1:
+        hops = "("+str(lastHops[addr])+" hops)"
+      print("\rSTATUS: Receive",addport,nicetos,nicettl,hops,numsec,"from",niceTime,":", pkts_in_this_second[addr]," packets at ",(bits_in_this_second[addr]/interval_seconds),"bits/sec")
+      bits_in_this_second[addr] = 0
+      pkts_in_this_second[addr] = 0
 
     if pkt == "NOMESG":
         return
 
-    lastPacketInterval = thisPacketInterval
-    pkts_in_this_second = pkts_in_this_second + 1
-    bits_in_this_second = bits_in_this_second + bitsRcv
+    lastPacketInterval[addr] = thisPacketInterval
+    pkts_in_this_second[addr] = pkts_in_this_second[addr] + 1
+    bits_in_this_second[addr] = bits_in_this_second[addr] + bitsRcv
 
     try:
       obj = json.loads(pkt.decode())
       latency = rcvTime - obj["time"]
-      seqdiff = obj["seq"] - lastSeqNum
-      if seqdiff != 1 and lastSeqNum > -1:
-        print("DETAIL: Out of sequence packet!",lastSeqNum,"->",obj["seq"])
-      lastSeqNum = obj["seq"]
+      seqdiff = obj["seq"] - lastSeqNum[addr]
+      if seqdiff != 1 and lastSeqNum[addr] > -1:
+        print("DETAIL: Out of sequence packet!",lastSeqNum[addr],"->",obj["seq"])
+      lastSeqNum[addr] = obj["seq"]
       if ttl >= 0:
-        lastHops = obj["initial_ttl"] - ttl
+        lastHops[addr] = obj["initial_ttl"] - ttl
 
       if display_spinner:
         print("\r",next(spinner), end='', flush=True, sep="")
       if display_detail:
         hops = ""
-        if lastHops > -1:
-          hops = "("+str(lastHops)+" hops)"
-        niceHops = "("+str(lastHops)+" hops)"
+        if lastHops[addr] > -1:
+          hops = "("+str(lastHops[addr])+" hops)"
+        niceHops = "("+str(lastHops[addr])+" hops)"
         print("Receive",addport,nicetos,nicettl,niceHops,"Seq=",obj["seq"]);
 
     except: 
       # can't parse payload
       if display_detail:
         print("DETAIL: Received unknown data from ",addr," total ",bitsRcv,"bits",nicettl,nicetos)
-      lastHops = -1
+      lastHops[addr] = -1
 
 def run(groups, port, iface=None, bind_group=None):
     # generally speaking you want to bind to one of the groups you joined in
