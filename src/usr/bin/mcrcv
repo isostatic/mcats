@@ -86,7 +86,8 @@ def parse(addr, ttl, pkt):
 
     except: 
       # can't parse payload
-      print("DETAIL: Received unknown data from ",addr," total ",bitsRcv,"bits",pkt)
+      if display_detail:
+        print("DETAIL: Received unknown data from ",addr," total ",bitsRcv,"bits")
       lastHops = -1
 
 def run(groups, port, iface=None, bind_group=None):
