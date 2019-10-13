@@ -18,6 +18,7 @@ current_interval = lambda: int(round(time.time())/interval_seconds)
 
 lastPacketInterval = {}
 lastHops = {}
+lastTos = {}
 lastSeqNum = {}
 
 pkts_in_this_second = {}
@@ -35,6 +36,7 @@ spinner = spinning_cursor()
 def parse(addr, ttl, tos, pkt):
     global lastSeqNum
     global lastHops
+    global lastTos
 
     global lastPacketInterval
     global pkts_in_this_second
@@ -55,10 +57,15 @@ def parse(addr, ttl, tos, pkt):
     if addr not in pkts_in_this_second:
         pkts_in_this_second[addr] = 0
 
+    if addr not in lastTos:
+        lastTos[addr] = tos
+
     addport = str(addr[0]) + ":" + str(addr[1])
     nicetos = ""
     if tos >= 0:
       nicetos = "TOS="+str(tos)
+      if tos != lastTos[addr]:
+        nicetos = nicetos + " (CHANGED from initial " + str(lastTos[addr]) + ")"
     nicettl = ""
     if ttl >= 0:
       nicettl = "TTL="+str(ttl)
@@ -103,6 +110,8 @@ def parse(addr, ttl, tos, pkt):
       lastSeqNum[addr] = obj["seq"]
       if ttl >= 0:
         lastHops[addr] = obj["initial_ttl"] - ttl
+      if tos >= 0:
+        lastTos[addr] = obj["initial_tos"]
 
       if display_spinner:
         print("\r",next(spinner), end='', flush=True, sep="")

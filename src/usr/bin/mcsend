@@ -60,6 +60,7 @@ while True:
   obj["seq"] = seq
   obj["starttime"] = starttime
   obj["initial_ttl"] = MCAST_TTL
+  obj["initial_tos"] = MCAST_TOS
   obj["mcast_dst"] = MCAST_GRP
   obj["mcast_port"] = MCAST_PORT
   obj["interpacket_time"] = INTPKT_TIME
