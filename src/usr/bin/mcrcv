@@ -16,6 +16,7 @@ interval_seconds = 4
 current_interval = lambda: int(round(time.time())/interval_seconds)
 lastPacketInterval = 0
 
+lastHops = -1
 lastSeqNum = -1
 
 pkts_in_this_second = 0
@@ -30,13 +31,15 @@ def spinning_cursor():
 
 spinner = spinning_cursor()
 
-def parse(addr, pkt):
+def parse(addr, ttl, pkt):
     global lastSeqNum
+    global lastHops
 
     global lastPacketInterval
     global pkts_in_this_second
     global bits_in_this_second
 
+    addport = str(addr[0]) + ":" + str(addr[1])
     rcvTime = current_nano_time()
     thisPacketInterval = current_interval()
     if pkt != "NOMESG":
@@ -54,7 +57,8 @@ def parse(addr, pkt):
       numsec = ""
       if interval_seconds != 1:
         numsec = "for "+str(interval_seconds)+" sec"
-      print("\rSTATUS: Receive",numsec,"from",niceTime,":", pkts_in_this_second," packets at ",(bits_in_this_second/interval_seconds),"bits/sec")
+      hops = "("+str(lastHops)+" hops)"
+      print("\rSTATUS: Receive",addport,"TTL=",ttl,hops,numsec," from",niceTime,":", pkts_in_this_second," packets at ",(bits_in_this_second/interval_seconds),"bits/sec")
       bits_in_this_second = 0
       pkts_in_this_second = 0
 
@@ -72,12 +76,14 @@ def parse(addr, pkt):
       if seqdiff != 1 and lastSeqNum > -1:
         print("DETAIL: Out of sequence packet!",lastSeqNum,"->",obj["seq"])
       lastSeqNum = obj["seq"]
+      lastHops = obj["initial_ttl"] - ttl
       if display_spinner:
         print("\r",next(spinner), end='', flush=True, sep="")
 
     except: 
       # can't parse payload
       print("DETAIL: Received unknown data from ",addr," total ",bitsRcv,"bits",pkt)
+      lastHops = -1
 
 def run(groups, port, iface=None, bind_group=None):
     # generally speaking you want to bind to one of the groups you joined in
@@ -103,13 +109,24 @@ def run(groups, port, iface=None, bind_group=None):
 
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
+    # IP_RECVTTL is 12
+    sock.setsockopt(socket.IPPROTO_IP, 12, 1)
+
     sock.settimeout(1)
     while True:
         try:
-            tpl = sock.recvfrom(65536)
-            data = tpl[0]
-            add = tpl[1]
-            parse(add, data)
+            resp = sock.recvmsg(65536, 1024)
+            data = resp[0]
+            ancdata = resp[1]
+            flags = resp[2]
+            add = resp[3]
+            # ancdata is an array of 
+            #    cmsg_level, cmsg_type, cmsg_data
+            # ttl = anddata[0]
+            ttlmsg = ancdata[0]
+            ttlbytes = ttlmsg[2]
+            ttl = int.from_bytes(ttlbytes, byteorder='little', signed=False)
+            parse(add, ttl, data)
         except KeyboardInterrupt:
             raise SystemExit
         except:
