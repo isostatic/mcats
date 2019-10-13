@@ -11,6 +11,7 @@ current_nano_time = lambda: int(round(time.time() * 1000000))
 
 # set to 1 if you want a 'spinner' to increment when a packet is received
 display_spinner = 1
+display_detail = 0
 
 interval_seconds = 4
 current_interval = lambda: int(round(time.time())/interval_seconds)
@@ -58,7 +59,7 @@ def parse(addr, ttl, pkt):
       if interval_seconds != 1:
         numsec = "for "+str(interval_seconds)+" sec"
       hops = "("+str(lastHops)+" hops)"
-      print("\rSTATUS: Receive",addport,"TTL=",ttl,hops,numsec," from",niceTime,":", pkts_in_this_second," packets at ",(bits_in_this_second/interval_seconds),"bits/sec")
+      print("\rSTATUS: Receive",addport,"TTL=",ttl,hops,numsec,"from",niceTime,":", pkts_in_this_second," packets at ",(bits_in_this_second/interval_seconds),"bits/sec")
       bits_in_this_second = 0
       pkts_in_this_second = 0
 
@@ -79,6 +80,9 @@ def parse(addr, ttl, pkt):
       lastHops = obj["initial_ttl"] - ttl
       if display_spinner:
         print("\r",next(spinner), end='', flush=True, sep="")
+      if display_detail:
+        niceHops = "("+str(lastHops)+" hops)"
+        print("Receive",addport,"TTL=",ttl,niceHops,"Seq=",obj["seq"]);
 
     except: 
       # can't parse payload
@@ -130,12 +134,13 @@ def run(groups, port, iface=None, bind_group=None):
         except KeyboardInterrupt:
             raise SystemExit
         except:
-            parse("0.0.0.0","NOMESG")
+            parse("0.0.0.0",0,"NOMESG")
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=19900)
+    parser.add_argument('--showdetail', type=int, default=0)
     parser.add_argument('--groups', default=["239.5.6.7"], nargs='*',
                         help='multicast groups (ip addrs) to listen to join')
     parser.add_argument(
@@ -152,4 +157,5 @@ if __name__ == '__main__':
         '(all addresses (all multicast addresses) of that interface)')
     args = parser.parse_args()
     print("Listening to",args.groups)
+    display_detail = args.showdetail
     run(args.groups, args.port, args.iface, args.bind_group)
