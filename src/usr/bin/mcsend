@@ -16,6 +16,7 @@ current_nano_time = lambda: int(round(time.time() * 1000000))
 
 INTPKT_TIME = 0.2
 MCAST_TTL = 20
+MCAST_TOS = 0
 
 MCAST_GRP = '239.1.1.12'
 MCAST_PORT = 6000
@@ -24,16 +25,18 @@ MCAST_GRP = '239.5.6.75'
 MCAST_PORT = 8910
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--port', type=int, default=19900)
-parser.add_argument('--time', type=float, default=0.2)
-parser.add_argument('--ttl', type=int, default=20)
-parser.add_argument('--group', default="239.5.6.7")
+parser.add_argument('--group', default="239.5.6.7", help="Group to target")
+parser.add_argument('--port', type=int, default=19900, help="Port to target")
+parser.add_argument('--time', type=float, default=0.2, help='Time (in seconds) between each packet. Minimum 10ms (100pps)')
+parser.add_argument('--ttl', type=int, default=20, help="TTL of multicast packet")
+parser.add_argument('--tos', type=int, default=0, help="TOS (deceimal - so 104 is 0x68 is AF31, 184/0xB8/EF)")
 args = parser.parse_args()
 
 MCAST_PORT=args.port
 MCAST_GRP=args.group
 INTPKT_TIME=args.time
 MCAST_TTL=args.ttl
+MCAST_TOS=args.tos
 
 if MCAST_TTL < 0.01:
   MCAST_TTL = 0.01
@@ -41,13 +44,15 @@ if MCAST_TTL < 0.01:
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, MCAST_TTL)
+sock.setsockopt(socket.IPPROTO_IP, socket.IP_TOS, MCAST_TOS)
 
 seq = 0
 starttime = current_nano_time()
 
 ifip = getOutboundIf(MCAST_GRP, MCAST_PORT)
 
-print "Sending multicast from",ifip," on ",MCAST_GRP,":",MCAST_PORT," with TTL of ",MCAST_TTL
+tos_hex = hex(MCAST_TOS)
+print("Sending multicast from",ifip,"on",MCAST_GRP,":",MCAST_PORT,"with TTL of",MCAST_TTL,"and TOS of",MCAST_TOS,str(tos_hex))
 
 while True:
   seq = seq + 1
