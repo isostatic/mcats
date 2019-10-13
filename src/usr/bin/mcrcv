@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 import sys
 import socket
 import struct
@@ -41,6 +41,13 @@ def parse(addr, ttl, tos, pkt):
     global bits_in_this_second
 
     addport = str(addr[0]) + ":" + str(addr[1])
+    nicetos = ""
+    if tos >= 0:
+      nicetos = "TOS="+str(tos)
+    nicettl = ""
+    if ttl >= 0:
+      nicettl = "TTL="+str(ttl)
+
     rcvTime = current_nano_time()
     thisPacketInterval = current_interval()
     if pkt != "NOMESG":
@@ -61,7 +68,7 @@ def parse(addr, ttl, tos, pkt):
       hops = ""
       if lastHops > -1:
         hops = "("+str(lastHops)+" hops)"
-      print("\rSTATUS: Receive",addport,"TTL=",ttl,hops,numsec,"from",niceTime,":", pkts_in_this_second," packets at ",(bits_in_this_second/interval_seconds),"bits/sec")
+      print("\rSTATUS: Receive",addport,nicetos,nicettl,hops,numsec,"from",niceTime,":", pkts_in_this_second," packets at ",(bits_in_this_second/interval_seconds),"bits/sec")
       bits_in_this_second = 0
       pkts_in_this_second = 0
 
@@ -79,7 +86,9 @@ def parse(addr, ttl, tos, pkt):
       if seqdiff != 1 and lastSeqNum > -1:
         print("DETAIL: Out of sequence packet!",lastSeqNum,"->",obj["seq"])
       lastSeqNum = obj["seq"]
-      lastHops = obj["initial_ttl"] - ttl
+      if ttl >= 0:
+        lastHops = obj["initial_ttl"] - ttl
+
       if display_spinner:
         print("\r",next(spinner), end='', flush=True, sep="")
       if display_detail:
@@ -87,12 +96,12 @@ def parse(addr, ttl, tos, pkt):
         if lastHops > -1:
           hops = "("+str(lastHops)+" hops)"
         niceHops = "("+str(lastHops)+" hops)"
-        print("Receive",addport,"TOS=",tos,"TTL=",ttl,niceHops,"Seq=",obj["seq"]);
+        print("Receive",addport,nicetos,nicettl,niceHops,"Seq=",obj["seq"]);
 
     except: 
       # can't parse payload
       if display_detail:
-        print("DETAIL: Received unknown data from ",addr," total ",bitsRcv,"bits")
+        print("DETAIL: Received unknown data from ",addr," total ",bitsRcv,"bits",nicettl,nicetos)
       lastHops = -1
 
 def run(groups, port, iface=None, bind_group=None):
@@ -120,9 +129,16 @@ def run(groups, port, iface=None, bind_group=None):
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
     # IP_RECVTTL is 12
-    sock.setsockopt(socket.IPPROTO_IP, 12, 1)
+    try:
+        sock.setsockopt(socket.IPPROTO_IP, 12, 1)
+    except:
+        print("ERR: Can't receive TTL")
+
     # IP_REVCTOS is 13
-    sock.setsockopt(socket.IPPROTO_IP, 13, 1)
+    try:
+        sock.setsockopt(socket.IPPROTO_IP, 13, 1)
+    except:
+        print("ERR: Can't receive TOS")
 
     sock.settimeout(1)
     while True:
@@ -132,20 +148,24 @@ def run(groups, port, iface=None, bind_group=None):
             ancdata = resp[1]
             flags = resp[2]
             add = resp[3]
-            # ancdata is an array of 
-            #    cmsg_level, cmsg_type, cmsg_data
-            # ttl = anddata[0]
-            ttlmsg = ancdata[0]
-            tosmsg = ancdata[1]
-            ttlbytes = ttlmsg[2]
-            tosbytes = tosmsg[2]
-            ttl = int.from_bytes(ttlbytes, byteorder='little', signed=False)
-            tos = int.from_bytes(tosbytes, byteorder='little', signed=False)
+            tos = -1
+            ttl = -1
+            if len(ancdata) > 0:
+                # ancdata is an array of 
+                #    cmsg_level, cmsg_type, cmsg_data
+                # ttl = anddata[0]
+                ttlmsg = ancdata[0]
+                tosmsg = ancdata[1]
+                ttlbytes = ttlmsg[2]
+                tosbytes = tosmsg[2]
+                ttl = int.from_bytes(ttlbytes, byteorder='little', signed=False)
+                tos = int.from_bytes(tosbytes, byteorder='little', signed=False)
+
             parse(add, ttl, tos, data)
         except KeyboardInterrupt:
             raise SystemExit
         except:
-            parse("0.0.0.0",0,0,"NOMESG")
+            parse("0.0.0.0",-2,-2,"NOMESG")
 
 
 if __name__ == '__main__':
