@@ -32,7 +32,7 @@ def spinning_cursor():
 
 spinner = spinning_cursor()
 
-def parse(addr, ttl, pkt):
+def parse(addr, ttl, tos, pkt):
     global lastSeqNum
     global lastHops
 
@@ -87,7 +87,7 @@ def parse(addr, ttl, pkt):
         if lastHops > -1:
           hops = "("+str(lastHops)+" hops)"
         niceHops = "("+str(lastHops)+" hops)"
-        print("Receive",addport,"TTL=",ttl,niceHops,"Seq=",obj["seq"]);
+        print("Receive",addport,"TOS=",tos,"TTL=",ttl,niceHops,"Seq=",obj["seq"]);
 
     except: 
       # can't parse payload
@@ -121,6 +121,8 @@ def run(groups, port, iface=None, bind_group=None):
 
     # IP_RECVTTL is 12
     sock.setsockopt(socket.IPPROTO_IP, 12, 1)
+    # IP_REVCTOS is 13
+    sock.setsockopt(socket.IPPROTO_IP, 13, 1)
 
     sock.settimeout(1)
     while True:
@@ -134,21 +136,24 @@ def run(groups, port, iface=None, bind_group=None):
             #    cmsg_level, cmsg_type, cmsg_data
             # ttl = anddata[0]
             ttlmsg = ancdata[0]
+            tosmsg = ancdata[1]
             ttlbytes = ttlmsg[2]
+            tosbytes = tosmsg[2]
             ttl = int.from_bytes(ttlbytes, byteorder='little', signed=False)
-            parse(add, ttl, data)
+            tos = int.from_bytes(tosbytes, byteorder='little', signed=False)
+            parse(add, ttl, tos, data)
         except KeyboardInterrupt:
             raise SystemExit
         except:
-            parse("0.0.0.0",0,"NOMESG")
+            parse("0.0.0.0",0,0,"NOMESG")
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--port', type=int, default=19900)
-    parser.add_argument('--showdetail', type=int, default=0)
-    parser.add_argument('--groups', default=["239.5.6.7"], nargs='*',
-                        help='multicast groups (ip addrs) to listen to join')
+    parser.add_argument('-p', '--port', type=int, default=19900, help="Port to listen on")
+    parser.add_argument('-v', '--showdetail', action='store_true', help="Print detail for every packet recieved")
+    parser.add_argument('-g', '--groups', default=["239.5.6.7"], nargs='*',
+                        help='multicast groups (ip addrs) to listen and join')
     parser.add_argument(
         '--iface', default=None,
         help='local interface to use for listening to multicast data; '
@@ -163,5 +168,6 @@ if __name__ == '__main__':
         '(all addresses (all multicast addresses) of that interface)')
     args = parser.parse_args()
     print("Listening to",args.groups)
-    display_detail = args.showdetail
+    if args.showdetail:
+      display_detail = 1
     run(args.groups, args.port, args.iface, args.bind_group)
