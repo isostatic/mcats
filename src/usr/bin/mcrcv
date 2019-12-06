@@ -13,12 +13,14 @@ current_nano_time = lambda: int(round(time.time() * 1000000))
 display_spinner = 1
 display_detail = 0
 
+ts_data_start = 0
+ts_data = bytearray()
+
 interval_seconds = 1
 current_interval = lambda: int(round(time.time())/interval_seconds)
 
 lastPacketInterval = {}
 lastHops = {}
-lastTos = {}
 lastSeqNum = {}
 
 pkts_in_this_second = {}
@@ -36,7 +38,6 @@ spinner = spinning_cursor()
 def parse(addr, ttl, tos, pkt):
     global lastSeqNum
     global lastHops
-    global lastTos
 
     global lastPacketInterval
     global pkts_in_this_second
@@ -57,15 +58,10 @@ def parse(addr, ttl, tos, pkt):
     if addr not in pkts_in_this_second:
         pkts_in_this_second[addr] = 0
 
-    if addr not in lastTos:
-        lastTos[addr] = tos
-
     addport = str(addr[0]) + ":" + str(addr[1])
     nicetos = ""
     if tos >= 0:
       nicetos = "TOS="+str(tos)
-      if tos != lastTos[addr]:
-        nicetos = nicetos + " (CHANGED from initial " + str(lastTos[addr]) + ")"
     nicettl = ""
     if ttl >= 0:
       nicettl = "TTL="+str(ttl)
@@ -90,7 +86,7 @@ def parse(addr, ttl, tos, pkt):
       hops = ""
       if lastHops[addr] > -1:
         hops = "("+str(lastHops[addr])+" hops)"
-      print("\rSTATUS: Receive",addport,nicetos,nicettl,hops,numsec,"from",niceTime,":", pkts_in_this_second[addr]," packets at ",(bits_in_this_second[addr]/interval_seconds),"bits/sec")
+      status("\rSTATUS: Receive",addport,nicetos,nicettl,hops,numsec,"from",niceTime,":", pkts_in_this_second[addr]," packets at ",(bits_in_this_second[addr]/interval_seconds),"bits/sec")
       bits_in_this_second[addr] = 0
       pkts_in_this_second[addr] = 0
 
@@ -106,29 +102,32 @@ def parse(addr, ttl, tos, pkt):
       latency = rcvTime - obj["time"]
       seqdiff = obj["seq"] - lastSeqNum[addr]
       if seqdiff != 1 and lastSeqNum[addr] > -1:
-        print("DETAIL: Out of sequence packet!",lastSeqNum[addr],"->",obj["seq"])
+        status("DETAIL: Out of sequence packet!",lastSeqNum[addr],"->",obj["seq"])
       lastSeqNum[addr] = obj["seq"]
       if ttl >= 0:
         lastHops[addr] = obj["initial_ttl"] - ttl
-      if tos >= 0:
-        lastTos[addr] = obj["initial_tos"]
 
       if display_spinner:
-        print("\r",next(spinner), end='', flush=True, sep="")
+        status("\r",next(spinner), end='', flush=True, sep="")
       if display_detail:
         hops = ""
         if lastHops[addr] > -1:
           hops = "("+str(lastHops[addr])+" hops)"
         niceHops = "("+str(lastHops[addr])+" hops)"
-        print("Receive",addport,nicetos,nicettl,niceHops,"Seq=",obj["seq"]);
+        status("Receive",addport,nicetos,nicettl,niceHops,"Seq=",obj["seq"]);
 
     except: 
       # can't parse payload
       if display_detail:
-        print("DETAIL: Received unknown data from ",addr," total ",bitsRcv,"bits",nicettl,nicetos)
+        status("DETAIL: Received unknown data from ",addr," total ",bitsRcv,"bits",nicettl,nicetos)
       lastHops[addr] = -1
 
-def run(groups, port, iface=None, bind_group=None):
+def status(*msg):
+    print(*msg)
+
+def run(groups, port, iface=None, bind_group=None, jpeg=False, fname=""):
+    global ts_data
+    global ts_data_start
     # generally speaking you want to bind to one of the groups you joined in
     # this script,
     # but it is also possible to bind to group which is added by some other
@@ -144,7 +143,7 @@ def run(groups, port, iface=None, bind_group=None):
 
     sock.bind(('' if bind_group is None else bind_group, port))
     for group in groups:
-        print("Listening to",group,":",port)
+        status("Listening to",group,":",port)
         mreq = struct.pack(
             '4sl' if iface is None else '4s4s',
             socket.inet_aton(group),
@@ -156,15 +155,17 @@ def run(groups, port, iface=None, bind_group=None):
     try:
         sock.setsockopt(socket.IPPROTO_IP, 12, 1)
     except:
-        print("ERR: Can't receive TTL")
+        status("ERR: Can't receive TTL")
 
     # IP_REVCTOS is 13
     try:
         sock.setsockopt(socket.IPPROTO_IP, 13, 1)
     except:
-        print("ERR: Can't receive TOS")
+        status("ERR: Can't receive TOS")
 
     sock.settimeout(1)
+    last_seqnum=-1
+    pktcount = 0;
     while True:
         try:
             resp = sock.recvmsg(65536, 1024)
@@ -185,10 +186,53 @@ def run(groups, port, iface=None, bind_group=None):
                 ttl = int.from_bytes(ttlbytes, byteorder='little', signed=False)
                 tos = int.from_bytes(tosbytes, byteorder='little', signed=False)
 
-            parse(add, ttl, tos, data)
+            if jpeg:
+              try:
+                seqbtes = data[2],data[3]
+                seqnum = int.from_bytes(seqbtes, byteorder='big')
+                if last_seqnum >= 0 and seqnum != last_seqnum +1:
+                  if last_seqnum == 65535 and seqnum == 0:
+                    status("SeqNum rollover")
+                  else:
+                    print("Seqnum discontinuity",last_seqnum,"to",seqnum,"Resetting stored stream");
+                    ts_data = bytearray()
+                    pktcount = 0
+                last_seqnum = seqnum
+                pktcount = pktcount + 1
+                if ts_data_start == 0:
+                  ts_data_start = current_nano_time()
+                # trim rtp header -- first 12 bytes
+#                data = data[12:]
+                ts_data.extend(data)
+              except Exception as ex: 
+                status("ERROR",ex)
+              finally:
+                enough_data = False
+                timetaken = current_nano_time() - ts_data_start
+                if len(ts_data) > 1000000000:
+                  enough_data = True
+                if current_nano_time() - ts_data_start > 10000000:
+                  enough_data = True
+                if enough_data:
+                  status("Byte cache full.",pktcount,"packets total",len(ts_data),"bytes in time=",timetaken,"writing to",fname)
+                  bps = 8*len(ts_data)*1000000/timetaken
+                  f = open(fname,'wb')
+                  f.write(ts_data)
+                  f.close()
+                  ts_data = bytearray()
+#                  print("Receive Time:",round(timetaken/1000000,2)," seconds")
+                  #print("BITRATE="+str(round(bps/1000000,2))+"Mbit;TOS="+str(tos)+";TTL="+str(ttl)+";SRC="+str(add[0]))
+                  print(str(round(bps/1000000,2))+"Mbit;"+str(tos)+";"+str(ttl)+";"+str(add[0]))
+                  raise SystemExit
+            else:
+              parse(add, ttl, tos, data)
         except KeyboardInterrupt:
             raise SystemExit
-        except:
+        except socket.timeout:
+            print("Time out")
+            if jpeg:
+              raise SystemExit
+        except Exception as ex:
             parse("0.0.0.0",-2,-2,"NOMESG")
 
 
@@ -196,6 +240,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-p', '--port', type=int, default=19900, help="Port to listen on")
     parser.add_argument('-v', '--showdetail', action='store_true', help="Print detail for every packet recieved")
+    parser.add_argument('-d', '--dumpts', help="Decode an RTP steram as a ts")
     parser.add_argument('-g', '--groups', default=["239.5.6.7"], nargs='*',
                         help='multicast groups (ip addrs) to listen and join')
     parser.add_argument(
@@ -211,7 +256,13 @@ if __name__ == '__main__':
         'If unspecified, bind to 0.0.0.0 '
         '(all addresses (all multicast addresses) of that interface)')
     args = parser.parse_args()
-    print("Listening to",args.groups)
+    status("Listening to",args.groups)
     if args.showdetail:
       display_detail = 1
-    run(args.groups, args.port, args.iface, args.bind_group)
+    fname="/tmp/"+args.groups[0]+".ts"
+    dumpts = True
+    if args.dumpts == None:
+        dumpts = False
+    else:
+        fname = args.dumpts
+    run(args.groups, args.port, args.iface, args.bind_group, args.dumpts, fname)
