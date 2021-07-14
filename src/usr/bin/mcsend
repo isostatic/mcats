@@ -1,5 +1,4 @@
-#!/usr/bin/python3
-import random
+#!/usr/bin/python
 import socket
 import argparse
 import struct
@@ -26,11 +25,11 @@ MCAST_GRP = '239.5.6.75'
 MCAST_PORT = 8910
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--group', default="239.5.6.7", help="Group to target")
-parser.add_argument('--port', type=int, default=19900, help="Port to target")
-parser.add_argument('--time', type=float, default=0.2, help='Time (in seconds) between each packet. Minimum 10ms (100pps)')
-parser.add_argument('--ttl', type=int, default=20, help="TTL of multicast packet")
-parser.add_argument('--tos', type=int, default=0, help="TOS (deceimal - so 104 is 0x68 is AF31, 184/0xB8/EF)")
+parser.add_argument('-g', '--group', default="239.191.255.255", help="Group to target")
+parser.add_argument('-p', '--port', type=int, default=19900, help="Port to target")
+parser.add_argument('-i', '--time', type=float, default=0.2, help='Time (in seconds) between each packet. Minimum 10ms (100pps)')
+parser.add_argument('-t', '--ttl', type=int, default=20, help="TTL of multicast packet")
+parser.add_argument('-q', '--tos', type=int, default=0, help="TOS (deceimal - so 104 is 0x68 is AF31, 184/0xB8/EF)")
 args = parser.parse_args()
 
 MCAST_PORT=args.port
@@ -55,86 +54,17 @@ ifip = getOutboundIf(MCAST_GRP, MCAST_PORT)
 tos_hex = hex(MCAST_TOS)
 print("Sending multicast from",ifip,"on",MCAST_GRP,":",MCAST_PORT,"with TTL of",MCAST_TTL,"and TOS of",MCAST_TOS,str(tos_hex))
 
-seqnum = 0
-ssrcbytes = random.randint(1,4294967295).to_bytes(4, byteorder='big')
-
 while True:
   seq = seq + 1
   obj = {}
   obj["seq"] = seq
   obj["starttime"] = starttime
-  obj["init_ttl"] = MCAST_TTL
-  obj["init_tos"] = MCAST_TOS
-  obj["mc_dst"] = MCAST_GRP
-  obj["mc_port"] = MCAST_PORT
-  obj["intrpckt_time"] = INTPKT_TIME
+  obj["initial_ttl"] = MCAST_TTL
+  obj["initial_tos"] = MCAST_TOS
+  obj["mcast_dst"] = MCAST_GRP
+  obj["mcast_port"] = MCAST_PORT
+  obj["interpacket_time"] = INTPKT_TIME
   obj["time"] = current_nano_time()
   JSON = json.dumps(obj)
-  # RTP packet header --
-  ## 0,1 - header detail
-  ##### bits 0,1 = 02 (version
-  ##### bits 2 = padding
-  ##### bits 3 = extension
-  ##### bits 4,5,6,7 = csrc count
-  ##### bits 8 = marker
-  ##### bits 9,10,11,12,13,14,15,16 = payload type
-
-  ## 2,3 - sequence
-  ## 4,5,6,7 - timestamp
-  ## 8,9,10,11 - ssrc
-
-  header = bytearray();
-  ##### bits 0,1 = version = 10
-  ##### bits 2 = padding = 0
-  ##### bits 3 = extension = 0
-  ##### bits 4,5,6,7 = csrc count = 0000
-  ## entire byte = 10 00 00 00 = 128
-  header.append(128)
-  ##### bits 8 = marker (0)
-  ##### bits 9,10,11,12,13,14,15,16 = payload type (33, 0x21)
-  ## entire byte = 00 00 00 21 = 33
-  ## 4,5,6,7 - timestamp -- We're pretending to be RTP Payload type MP2T, defined  in rfc1890 as 33
-  header.append(33)
-
-  ## 2,3 - sequence
-  seqnumbytes = (seqnum).to_bytes(2, byteorder='big')
-  header.extend(seqnumbytes)
-
-  ## 4,5,6,7 - timestamp -- We're pretending to be RTP Payload type MP2T, defined in rfc1890 as a timestamp with a 90khz clock rate. Timestamp will thus wrap approximately every 13h30 minutes
-  t = int(round(time.time() * 90000)) % 4294967296
-  print("Timestamp:",t);
-  timestampbytes = (t).to_bytes(4, byteorder='big')
-  header.extend(timestampbytes)
-
-  ## 8,9,10,11 - ssrc
-  header.extend(ssrcbytes)
-  print( "Header:",header.hex())
-
-  seqnum += 1
-  if (seqnum > 65535):
-    seqnum = 0
-
-
-  # add the payload, we aren't a decodable RTP stream, we send a json payload embedded in a null frame instead. Total payload is 7x188 byte MTS packets
-
-  # header for a null frame is 47 1f ff 10, rest of payload 184 bytes. 
-  mts = bytearray();
-  mts.append(71)
-  mts.append(31)
-  mts.append(255)
-  mts.append(16)
-
-  payload = JSON.encode('utf-8')
-
-  mts.extend(payload)
-  for x in range(len(payload), 184):
-    mts.append(0)
-
-  print ("payload=",len(mts))
-#  print ("JSON.encode=",JSON.encoode('utf-8'))
-
-  for x in range(0, 7):
-    header.extend(mts)
-
-  sock.sendto(header, (MCAST_GRP, MCAST_PORT))
+  sock.sendto(JSON, (MCAST_GRP, MCAST_PORT))
   time.sleep(INTPKT_TIME)

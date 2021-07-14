@@ -11,7 +11,7 @@ current_nano_time = lambda: int(round(time.time() * 1000000))
 
 # set to 1 if you want a 'spinner' to increment when a packet is received
 display_spinner = 1
-display_detail = 0
+display_detail = 1
 
 ts_data_start = 0
 ts_data = bytearray()
@@ -97,29 +97,42 @@ def parse(addr, ttl, tos, pkt):
     pkts_in_this_second[addr] = pkts_in_this_second[addr] + 1
     bits_in_this_second[addr] = bits_in_this_second[addr] + bitsRcv
 
+    # data could be fake RTP from mcrcv, if so, check the data. Packet = 128,33,seq,seq,ts,ts,ts,ts,ssrc,ssrc,ssrc,ssrc,mtsheader for null frame (71,31,255,16 aka 47 1f ff 10)
+    if len(pkt) == 1328 and pkt[0] == 128 and pkt[1] == 33 and pkt[12] == 71 and pkt[13] == 31 and pkt[14] == 255 and pkt[15] == 16:
+        # header working
+        tsseqbtes = pkt[2],pkt[3]
+        tsseqnum = int.from_bytes(tsseqbtes, byteorder='big')
+        tstimestampbtes = pkt[4],pkt[5],pkt[6],pkt[7]
+        tstimestamp = int.from_bytes(tstimestampbtes, byteorder='big')
+        tsssrcbtes = pkt[8],pkt[9],pkt[10],pkt[11]
+        tsssrc = int.from_bytes(tsssrcbtes, byteorder='big')
+#        print ("Could be Null Frame RTP sequence", tsseqnum, "timestamp",tstimestamp,"ssrc",tsssrc,"len=",len(pkt))
+        #bytes[
+        ## sd
+    # data could be JSON
     try:
-      obj = json.loads(pkt.decode())
-      latency = rcvTime - obj["time"]
-      seqdiff = obj["seq"] - lastSeqNum[addr]
-      if seqdiff != 1 and lastSeqNum[addr] > -1:
-        status("DETAIL: Out of sequence packet!",lastSeqNum[addr],"->",obj["seq"])
-      lastSeqNum[addr] = obj["seq"]
-      if ttl >= 0:
-        lastHops[addr] = obj["initial_ttl"] - ttl
-
-      if display_spinner:
-        status("\r",next(spinner), end='', flush=True, sep="")
-      if display_detail:
-        hops = ""
-        if lastHops[addr] > -1:
-          hops = "("+str(lastHops[addr])+" hops)"
-        niceHops = "("+str(lastHops[addr])+" hops)"
-        status("Receive",addport,nicetos,nicettl,niceHops,"Seq=",obj["seq"]);
+        obj = json.loads(data)
+        latency = rcvTime - obj["time"]
+        seqdiff = obj["seq"] - lastSeqNum[addr]
+        if seqdiff != 1 and lastSeqNum[addr] > -1:
+          status("DETAIL: Out of sequence packet!",lastSeqNum[addr],"->",obj["seq"])
+        lastSeqNum[addr] = obj["seq"]
+        if ttl >= 0:
+          lastHops[addr] = obj["initial_ttl"] - ttl
+  
+        if display_spinner:
+          status("\r",next(spinner), end='', flush=True, sep="")
+        if display_detail:
+          hops = ""
+          if lastHops[addr] > -1:
+            hops = "("+str(lastHops[addr])+" hops)"
+          niceHops = "("+str(lastHops[addr])+" hops)"
+          status("Receive",addport,nicetos,nicettl,niceHops,"Seq=",obj["seq"]);
 
     except: 
-      # can't parse payload
-      if display_detail:
-        status("DETAIL: Received unknown data from ",addr," total ",bitsRcv,"bits",nicettl,nicetos)
+      # can't parse payload, probably just multicast stream
+#      if display_detail:
+#        status("DETAIL: Received unknown data from ",addr," total ",bitsRcv,"bits",nicettl,nicetos)
       lastHops[addr] = -1
 
 def status(*msg):
@@ -241,7 +254,7 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--port', type=int, default=19900, help="Port to listen on")
     parser.add_argument('-v', '--showdetail', action='store_true', help="Print detail for every packet recieved")
     parser.add_argument('-d', '--dumpts', help="Decode an RTP steram as a ts")
-    parser.add_argument('-g', '--groups', default=["239.5.6.7"], nargs='*',
+    parser.add_argument('-g', '--groups', default=["239.191.255.255"], nargs='*',
                         help='multicast groups (ip addrs) to listen and join')
     parser.add_argument(
         '--iface', default=None,
@@ -265,4 +278,5 @@ if __name__ == '__main__':
         dumpts = False
     else:
         fname = args.dumpts
-    run(args.groups, args.port, args.iface, args.bind_group, args.dumpts, fname)
+#    run(args.groups, args.port, args.iface, args.bind_group, args.dumpts, fname)
+    run(args.groups, args.port, args.iface, args.groups[0], args.dumpts, fname)
